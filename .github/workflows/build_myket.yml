@@ -21,8 +21,8 @@ env:
   JAVA_VERSION: "17"
   ANDROID_COMPILE_SDK: "36"
   ANDROID_BUILD_TOOLS: "36.0.0"
-  BUILD_NAME: "3.5.0"
-  BUILD_NUMBER: "13"
+  BUILD_NAME: "3.8.0"
+  BUILD_NUMBER: "16"
 
 jobs:
   build:
@@ -38,7 +38,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ZIP_FILE="$(find . -maxdepth 2 -type f -name '*.zip' | head -n 1 || true)"
+          ZIP_FILE="$(find . -maxdepth 2 -type f -name '*.zip' | sort | tail -n 1 || true)"
           if [ -n "$ZIP_FILE" ]; then
             echo "Found ZIP file: $ZIP_FILE"
             rm -rf app extracted_project
@@ -175,13 +175,13 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nasabnama-v3-5-spouse-layout-apk
+          name: nasabnama-v3-8-manage-relations-apk
           path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
 
       - name: Upload AAB artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nasabnama-v3-5-spouse-layout-aab
+          name: nasabnama-v3-8-manage-relations-aab
           path: ${{ env.PROJECT_DIR }}/build/app/outputs/bundle/release/app-release.aab
           if-no-files-found: error
