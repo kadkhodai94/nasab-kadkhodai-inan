@@ -39,8 +39,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Preparing Flutter project..."
-
           ZIP_FILE="$(find . -maxdepth 2 -type f -name '*.zip' | head -n 1 || true)"
 
           if [ -n "$ZIP_FILE" ]; then
@@ -80,12 +78,6 @@ jobs:
 
           cd "$PROJECT_DIR"
 
-          if [ ! -f pubspec.yaml ]; then
-            echo "ERROR: pubspec.yaml not found in $PROJECT_DIR"
-            exit 1
-          fi
-
-          echo "Forcing valid Dart package name..."
           sed -i "s/^name:.*/name: ${PROJECT_NAME}/g" pubspec.yaml
 
           echo "Current pubspec name:"
@@ -96,7 +88,6 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
-          cache: gradle
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
@@ -105,9 +96,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
 
           SDKMANAGER="$(command -v sdkmanager || true)"
 
@@ -142,7 +130,6 @@ jobs:
         run: |
           flutter config --no-analytics
           flutter --version
-          flutter doctor -v
 
       - name: Create Android project shell if needed
         shell: bash
@@ -152,14 +139,11 @@ jobs:
           cd "$PROJECT_DIR"
 
           if [ ! -d android ]; then
-            echo "Android folder not found. Creating Android shell..."
             flutter create \
               --platforms=android \
               --org "$ORG_ID" \
               --project-name "$PROJECT_NAME" \
               .
-          else
-            echo "Android folder already exists."
           fi
 
           rm -f test/widget_test.dart
@@ -170,8 +154,6 @@ jobs:
           set -euo pipefail
 
           cd "$PROJECT_DIR"
-
-          echo "Patching Android compileSdk to ${ANDROID_COMPILE_SDK}..."
 
           if [ -f android/app/build.gradle.kts ]; then
             perl -0pi -e "s/compileSdk\s*=\s*(flutter\.compileSdkVersion|\d+)/compileSdk = ${ANDROID_COMPILE_SDK}/g" android/app/build.gradle.kts
