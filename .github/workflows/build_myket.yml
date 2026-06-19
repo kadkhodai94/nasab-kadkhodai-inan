@@ -1,4 +1,4 @@
-name: Build Nasabnama Flutter APK/AAB
+name: NasabNama Android Release
 
 on:
   workflow_dispatch:
@@ -8,11 +8,12 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Detect and extract uploaded project zip if repository contains one
+      - name: Extract project zip if exists
         shell: bash
         run: |
           set -e
@@ -44,12 +45,15 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Disable Flutter analytics
+        run: flutter config --no-analytics
+
       - name: Create Android shell if needed
         shell: bash
         run: |
           set -e
           if [ ! -d android ]; then
-            flutter create --platforms=android --org com.nasabnama .
+            flutter create --platforms=android --org com.nasabnama --project-name nasab_kadkhodai_inan .
           fi
 
       - name: Get packages
