@@ -21,8 +21,8 @@ env:
   JAVA_VERSION: "17"
   ANDROID_COMPILE_SDK: "36"
   ANDROID_BUILD_TOOLS: "36.0.0"
-  BUILD_NAME: "2.1.2"
-  BUILD_NUMBER: "7"
+  BUILD_NAME: "3.0.0"
+  BUILD_NUMBER: "8"
 
 jobs:
   build:
@@ -38,27 +38,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           ZIP_FILE="$(find . -maxdepth 2 -type f -name '*.zip' | head -n 1 || true)"
-
           if [ -n "$ZIP_FILE" ]; then
             echo "Found ZIP file: $ZIP_FILE"
-
             rm -rf app extracted_project
             mkdir -p app extracted_project
-
             unzip -q -o "$ZIP_FILE" -d extracted_project
-
             PUBSPEC_PATH="$(find extracted_project -name pubspec.yaml | head -n 1 || true)"
-
             if [ -z "$PUBSPEC_PATH" ]; then
               echo "ERROR: pubspec.yaml not found inside ZIP."
               exit 1
             fi
-
             PROJECT_ROOT="$(dirname "$PUBSPEC_PATH")"
-            echo "Flutter project found at: $PROJECT_ROOT"
-
             rsync -a "$PROJECT_ROOT"/ app/
             echo "PROJECT_DIR=app" >> "$GITHUB_ENV"
           else
@@ -66,8 +57,6 @@ jobs:
               echo "ERROR: No ZIP file and no pubspec.yaml found."
               exit 1
             fi
-
-            echo "Using repository root as Flutter project."
             echo "PROJECT_DIR=." >> "$GITHUB_ENV"
           fi
 
@@ -75,12 +64,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
-
           sed -i "s/^name:.*/name: ${PROJECT_NAME}/g" pubspec.yaml
-
-          echo "Current pubspec name:"
           grep "^name:" pubspec.yaml
 
       - name: Set up Java
@@ -96,9 +81,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           SDKMANAGER="$(command -v sdkmanager || true)"
-
           if [ -z "$SDKMANAGER" ]; then
             if [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
               SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
@@ -110,9 +93,6 @@ jobs:
               exit 1
             fi
           fi
-
-          echo "Using sdkmanager: $SDKMANAGER"
-
           "$SDKMANAGER" --sdk_root="$ANDROID_HOME" \
             "platform-tools" \
             "platforms;android-${ANDROID_COMPILE_SDK}" \
@@ -135,31 +115,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
-
           if [ ! -d android ]; then
-            flutter create \
-              --platforms=android \
-              --org "$ORG_ID" \
-              --project-name "$PROJECT_NAME" \
-              .
+            flutter create --platforms=android --org "$ORG_ID" --project-name "$PROJECT_NAME" .
           fi
-
           rm -f test/widget_test.dart
 
       - name: Force Android compileSdk
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
-
           if [ -f android/app/build.gradle.kts ]; then
             perl -0pi -e "s/compileSdk\s*=\s*(flutter\.compileSdkVersion|\d+)/compileSdk = ${ANDROID_COMPILE_SDK}/g" android/app/build.gradle.kts
             grep -n "compileSdk" android/app/build.gradle.kts || true
           fi
-
           if [ -f android/app/build.gradle ]; then
             perl -0pi -e "s/compileSdkVersion\s+(flutter\.compileSdkVersion|\d+)/compileSdkVersion ${ANDROID_COMPILE_SDK}/g" android/app/build.gradle
             perl -0pi -e "s/compileSdk\s*=\s*(flutter\.compileSdkVersion|\d+)/compileSdk = ${ANDROID_COMPILE_SDK}/g" android/app/build.gradle
@@ -170,20 +140,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
-
           flutter clean
-          rm -rf .dart_tool
-          rm -rf build
-          rm -rf android/.gradle
-          rm -rf android/app/build
+          rm -rf .dart_tool build android/.gradle android/app/build
 
       - name: Get Flutter packages
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
           flutter pub get
 
@@ -191,7 +155,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
           flutter analyze --no-fatal-infos --no-fatal-warnings
 
@@ -199,36 +162,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
-          flutter build apk \
-            --release \
-            --no-shrink \
-            --build-name="$BUILD_NAME" \
-            --build-number="$BUILD_NUMBER"
+          flutter build apk --release --no-shrink --build-name="$BUILD_NAME" --build-number="$BUILD_NUMBER"
 
       - name: Build release AAB
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
-          flutter build appbundle \
-            --release \
-            --no-shrink \
-            --build-name="$BUILD_NAME" \
-            --build-number="$BUILD_NUMBER"
+          flutter build appbundle --release --no-shrink --build-name="$BUILD_NAME" --build-number="$BUILD_NUMBER"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nasabnama-production-apk
+          name: nasabnama-v3-full-local-apk
           path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
 
       - name: Upload AAB artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nasabnama-production-aab
+          name: nasabnama-v3-full-local-aab
           path: ${{ env.PROJECT_DIR }}/build/app/outputs/bundle/release/app-release.aab
           if-no-files-found: error
