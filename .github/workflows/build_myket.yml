@@ -1,4 +1,4 @@
-name: NasabNama Auto ZIP Android Build
+name: NasabNama Safe ZIP Android Build
 
 on:
   workflow_dispatch:
@@ -11,20 +11,22 @@ permissions:
   contents: read
 
 concurrency:
-  group: nasabnama-auto-zip-build
+  group: nasabnama-safe-zip-build
   cancel-in-progress: true
 
 env:
   PROJECT_NAME: nasab_kadkhodai_inan
-  ORG_ID: com.nasabnama
+  ORG_ID: mk.kadkhodai
+  ANDROID_PACKAGE_NAME: mk.kadkhodai.nasab
   FLUTTER_VERSION: "3.32.8"
   JAVA_VERSION: "17"
   ANDROID_COMPILE_SDK: "36"
   ANDROID_BUILD_TOOLS: "36.0.0"
+  BAZAAR_PUBLIC_KEY: ${{ secrets.BAZAAR_PUBLIC_KEY }}
 
 jobs:
   build:
-    name: Build APK and AAB from Latest ZIP
+    name: Build NasabNama APK and AAB
     runs-on: ubuntu-24.04
     timeout-minutes: 45
 
@@ -32,50 +34,54 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Find and extract latest project ZIP
+      - name: Find and extract latest NasabNama ZIP only
         shell: bash
         run: |
           set -euo pipefail
-
-          echo "Searching for ZIP files..."
-
+          echo "Searching only for NasabNama ZIP files..."
           mapfile -t ZIP_FILES < <(
-            find . -maxdepth 2 -type f -name "*.zip" \
+            find . -maxdepth 2 -type f \( \
+              -name "nasabnama_flutter_*.zip" -o \
+              -name "nasab_*.zip" \
+            \) \
               ! -path "./app/*" \
               ! -path "./extracted_project/*" \
               | sort -V
           )
 
           if [ "${#ZIP_FILES[@]}" -eq 0 ]; then
-            echo "ERROR: No ZIP file found in repository."
-            echo "Upload your latest project ZIP to the repository root."
+            echo "ERROR: No NasabNama ZIP found."
+            echo "Put only the latest nasabnama_flutter_*.zip in repository root."
             exit 1
           fi
 
           ZIP_FILE="${ZIP_FILES[$((${#ZIP_FILES[@]}-1))]}"
-
-          echo "Selected ZIP:"
-          echo "$ZIP_FILE"
+          echo "Selected NasabNama ZIP: $ZIP_FILE"
 
           rm -rf app extracted_project
           mkdir -p app extracted_project
-
           unzip -q -o "$ZIP_FILE" -d extracted_project
 
           PUBSPEC_PATH="$(find extracted_project -name pubspec.yaml | head -n 1 || true)"
-
           if [ -z "$PUBSPEC_PATH" ]; then
             echo "ERROR: pubspec.yaml not found inside ZIP."
             exit 1
           fi
 
           PROJECT_ROOT="$(dirname "$PUBSPEC_PATH")"
+          echo "Flutter project found at: $PROJECT_ROOT"
 
-          echo "Flutter project found at:"
-          echo "$PROJECT_ROOT"
+          if grep -qiE "kids|learning|alphabet|کودک|حروف فارسی|قهرمان کوچولو" "$PROJECT_ROOT/pubspec.yaml" 2>/dev/null; then
+            echo "ERROR: This ZIP looks like another project, not NasabNama."
+            exit 1
+          fi
+
+          if [ -f "$PROJECT_ROOT/lib/main.dart" ] && grep -qiE "قهرمان کوچولو|حروف فارسی|KidsLearning|kids_learning" "$PROJECT_ROOT/lib/main.dart"; then
+            echo "ERROR: Wrong project detected in lib/main.dart. Build stopped."
+            exit 1
+          fi
 
           rsync -a "$PROJECT_ROOT"/ app/
-
           echo "PROJECT_DIR=app" >> "$GITHUB_ENV"
           echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
 
@@ -83,35 +89,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
-
-          echo "Forcing valid Dart package name..."
           sed -i "s/^name:.*/name: ${PROJECT_NAME}/g" pubspec.yaml
-
           VERSION_LINE="$(grep '^version:' pubspec.yaml | awk '{print $2}' || true)"
-
           if [ -z "$VERSION_LINE" ]; then
-            echo "No version found in pubspec.yaml. Using default 1.0.0+1"
             VERSION_LINE="1.0.0+1"
             echo "version: $VERSION_LINE" >> pubspec.yaml
           fi
-
           BUILD_NAME="${VERSION_LINE%%+*}"
           BUILD_NUMBER="${VERSION_LINE##*+}"
-
           if [ "$BUILD_NAME" = "$BUILD_NUMBER" ]; then
             BUILD_NUMBER="1"
           fi
-
-          echo "Detected version:"
-          echo "BUILD_NAME=$BUILD_NAME"
-          echo "BUILD_NUMBER=$BUILD_NUMBER"
-
           echo "BUILD_NAME=$BUILD_NAME" >> "$GITHUB_ENV"
           echo "BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
-
-          echo "Current pubspec:"
           grep -E "^(name|version):" pubspec.yaml
 
       - name: Set up Java
@@ -127,9 +118,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           SDKMANAGER="$(command -v sdkmanager || true)"
-
           if [ -z "$SDKMANAGER" ]; then
             if [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
               SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
@@ -141,10 +130,6 @@ jobs:
               exit 1
             fi
           fi
-
-          echo "Using sdkmanager:"
-          echo "$SDKMANAGER"
-
           "$SDKMANAGER" --sdk_root="$ANDROID_HOME" \
             "platform-tools" \
             "platforms;android-${ANDROID_COMPILE_SDK}" \
@@ -167,58 +152,82 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cd "$PROJECT_DIR"
+          if [ ! -d android ]; then
+            flutter create --platforms=android --org "$ORG_ID" --project-name "$PROJECT_NAME" .
+          fi
+          rm -f test/widget_test.dart
 
+      - name: Force package name and release signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+          echo "Forcing Android package: $ANDROID_PACKAGE_NAME"
+
+          PKG_PATH="${ANDROID_PACKAGE_NAME//./\/}"
+          mkdir -p "android/app/src/main/kotlin/$PKG_PATH"
+          find android/app/src/main/kotlin -name "MainActivity.kt" -delete 2>/dev/null || true
+
+          cat > "android/app/src/main/kotlin/$PKG_PATH/MainActivity.kt" <<KOTLIN
+          package $ANDROID_PACKAGE_NAME
+
+          import io.flutter.embedding.android.FlutterActivity
+
+          class MainActivity: FlutterActivity()
+          KOTLIN
+
+          mkdir -p android/app
+          cp -f android_signing/key.properties android/key.properties
+          cp -f android_signing/*.jks android/app/
+
+      - name: Force launcher icons
+        shell: bash
+        run: |
+          set -euo pipefail
           cd "$PROJECT_DIR"
 
-          if [ ! -d android ]; then
-            echo "Android folder not found. Creating Android shell..."
-            flutter create \
-              --platforms=android \
-              --org "$ORG_ID" \
-              --project-name "$PROJECT_NAME" \
-              .
-          else
-            echo "Android folder already exists."
-          fi
+          mkdir -p android/app/src/main/res/mipmap-mdpi
+          mkdir -p android/app/src/main/res/mipmap-hdpi
+          mkdir -p android/app/src/main/res/mipmap-xhdpi
+          mkdir -p android/app/src/main/res/mipmap-xxhdpi
+          mkdir -p android/app/src/main/res/mipmap-xxxhdpi
+          mkdir -p android/app/src/main/res/mipmap-anydpi-v26
+          mkdir -p android/app/src/main/res/values
 
-          rm -f test/widget_test.dart
+          cp -f android_launcher_icons/mipmap-mdpi/*.png android/app/src/main/res/mipmap-mdpi/
+          cp -f android_launcher_icons/mipmap-hdpi/*.png android/app/src/main/res/mipmap-hdpi/
+          cp -f android_launcher_icons/mipmap-xhdpi/*.png android/app/src/main/res/mipmap-xhdpi/
+          cp -f android_launcher_icons/mipmap-xxhdpi/*.png android/app/src/main/res/mipmap-xxhdpi/
+          cp -f android_launcher_icons/mipmap-xxxhdpi/*.png android/app/src/main/res/mipmap-xxxhdpi/
+          cp -f android_launcher_icons/mipmap-anydpi-v26/*.xml android/app/src/main/res/mipmap-anydpi-v26/
+          cp -f android_launcher_icons/values/*.xml android/app/src/main/res/values/
 
       - name: Force Android compileSdk
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
-
           if [ -f android/app/build.gradle.kts ]; then
             perl -0pi -e "s/compileSdk\s*=\s*(flutter\.compileSdkVersion|\d+)/compileSdk = ${ANDROID_COMPILE_SDK}/g" android/app/build.gradle.kts
-            grep -n "compileSdk" android/app/build.gradle.kts || true
           fi
-
           if [ -f android/app/build.gradle ]; then
             perl -0pi -e "s/compileSdkVersion\s+(flutter\.compileSdkVersion|\d+)/compileSdkVersion ${ANDROID_COMPILE_SDK}/g" android/app/build.gradle
             perl -0pi -e "s/compileSdk\s*=\s*(flutter\.compileSdkVersion|\d+)/compileSdk = ${ANDROID_COMPILE_SDK}/g" android/app/build.gradle
-            grep -n "compileSdk" android/app/build.gradle || true
           fi
 
       - name: Clean Flutter and Gradle state
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
-
           flutter clean
-          rm -rf .dart_tool
-          rm -rf build
-          rm -rf android/.gradle
-          rm -rf android/app/build
+          rm -rf .dart_tool build android/.gradle android/app/build
 
       - name: Get Flutter packages
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
           flutter pub get
 
@@ -226,7 +235,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
           flutter analyze --no-fatal-infos --no-fatal-warnings
 
@@ -234,46 +242,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
-
-          echo "Building APK:"
-          echo "Version name: $BUILD_NAME"
-          echo "Version code: $BUILD_NUMBER"
-
-          flutter build apk \
-            --release \
-            --no-shrink \
-            --build-name="$BUILD_NAME" \
-            --build-number="$BUILD_NUMBER"
+          flutter build apk --release --no-shrink --dart-define=BAZAAR_PUBLIC_KEY="$BAZAAR_PUBLIC_KEY" --build-name="$BUILD_NAME" --build-number="$BUILD_NUMBER"
 
       - name: Build release AAB
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
-
-          echo "Building AAB:"
-          echo "Version name: $BUILD_NAME"
-          echo "Version code: $BUILD_NUMBER"
-
-          flutter build appbundle \
-            --release \
-            --no-shrink \
-            --build-name="$BUILD_NAME" \
-            --build-number="$BUILD_NUMBER"
+          flutter build appbundle --release --no-shrink --dart-define=BAZAAR_PUBLIC_KEY="$BAZAAR_PUBLIC_KEY" --build-name="$BUILD_NAME" --build-number="$BUILD_NUMBER"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nasabnama-auto-v${{ env.BUILD_NAME }}-${{ env.BUILD_NUMBER }}-apk
+          name: nasabnama-v${{ env.BUILD_NAME }}-${{ env.BUILD_NUMBER }}-apk
           path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
 
       - name: Upload AAB artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nasabnama-auto-v${{ env.BUILD_NAME }}-${{ env.BUILD_NUMBER }}-aab
+          name: nasabnama-v${{ env.BUILD_NAME }}-${{ env.BUILD_NUMBER }}-aab
           path: ${{ env.PROJECT_DIR }}/build/app/outputs/bundle/release/app-release.aab
           if-no-files-found: error
