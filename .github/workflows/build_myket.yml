@@ -37,47 +37,36 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           mapfile -t ZIP_FILES < <(
             find . -maxdepth 2 -type f \( -name "nasabnama_flutter_*.zip" -o -name "nasab_*.zip" \) \
               ! -path "./app/*" \
               ! -path "./extracted_project/*" \
               | sort -V
           )
-
           if [ "${#ZIP_FILES[@]}" -eq 0 ]; then
             echo "ERROR: No NasabNama ZIP found in repository root."
             exit 1
           fi
-
           ZIP_FILE="${ZIP_FILES[$((${#ZIP_FILES[@]}-1))]}"
           echo "Selected ZIP: $ZIP_FILE"
-
           rm -rf app extracted_project
           mkdir -p app extracted_project
           unzip -q -o "$ZIP_FILE" -d extracted_project
-
           PUBSPEC_PATH="$(find extracted_project -name pubspec.yaml | head -n 1 || true)"
           if [ -z "$PUBSPEC_PATH" ]; then
             echo "ERROR: pubspec.yaml not found."
             exit 1
           fi
-
           PROJECT_ROOT="$(dirname "$PUBSPEC_PATH")"
-          echo "Flutter project root: $PROJECT_ROOT"
-
           if grep -qiE "kids|learning|alphabet|کودک|حروف فارسی|قهرمان کوچولو" "$PROJECT_ROOT/pubspec.yaml" 2>/dev/null; then
             echo "ERROR: wrong project ZIP detected from pubspec."
             exit 1
           fi
-
           if [ -f "$PROJECT_ROOT/lib/main.dart" ] && grep -qiE "قهرمان کوچولو|حروف فارسی|KidsLearning|kids_learning" "$PROJECT_ROOT/lib/main.dart"; then
             echo "ERROR: wrong main.dart detected."
             exit 1
           fi
-
           rsync -a "$PROJECT_ROOT"/ app/
-
           echo "PROJECT_DIR=app" >> "$GITHUB_ENV"
           echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
 
@@ -85,30 +74,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
-
           sed -i "s/^name:.*/name: ${PROJECT_NAME}/g" pubspec.yaml
-
           VERSION_LINE="$(grep '^version:' pubspec.yaml | awk '{print $2}' || true)"
-
           if [ -z "$VERSION_LINE" ]; then
             VERSION_LINE="1.0.0+1"
             echo "version: $VERSION_LINE" >> pubspec.yaml
           fi
-
           BUILD_NAME="${VERSION_LINE%%+*}"
           BUILD_NUMBER="${VERSION_LINE##*+}"
-
           if [ "$BUILD_NAME" = "$BUILD_NUMBER" ]; then
             BUILD_NUMBER="1"
           fi
-
           echo "BUILD_NAME=$BUILD_NAME" >> "$GITHUB_ENV"
           echo "BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
-
-          echo "Build name: $BUILD_NAME"
-          echo "Build number: $BUILD_NUMBER"
           grep -E "^(name|version):" pubspec.yaml
 
       - name: Set up Java
@@ -124,7 +103,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           sdkmanager --sdk_root="$ANDROID_HOME" \
             "platform-tools" \
             "platforms;android-${ANDROID_COMPILE_SDK}" \
@@ -147,54 +125,39 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
-
           rm -rf android
           flutter create --platforms=android --org "$ORG_ID" --project-name "$PROJECT_NAME" .
-
           rm -f test/widget_test.dart
 
       - name: Force package namespace and MainActivity consistently
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
-
           PKG_PATH="${ANDROID_PACKAGE_NAME//./\/}"
-
           rm -rf android/app/src/main/kotlin
           rm -rf android/app/src/main/java
-
           mkdir -p "android/app/src/main/kotlin/$PKG_PATH"
-
           printf 'package %s\n\nimport io.flutter.embedding.android.FlutterActivity\n\nclass MainActivity: FlutterActivity()\n' "$ANDROID_PACKAGE_NAME" > "android/app/src/main/kotlin/$PKG_PATH/MainActivity.kt"
-
           python3 - <<'PY'
           from pathlib import Path
           import os
           import re
-
           package_name = os.environ["ANDROID_PACKAGE_NAME"]
-
           manifest = Path("android/app/src/main/AndroidManifest.xml")
           text = manifest.read_text()
-
           text = re.sub(r'package="[^"]*"', '', text)
           text = re.sub(r'android:name="\.[^"]*MainActivity"', f'android:name="{package_name}.MainActivity"', text)
           text = re.sub(r'android:name="[^"]*MainActivity"', f'android:name="{package_name}.MainActivity"', text)
           text = re.sub(r'android:label="[^"]*"', 'android:label="نسب‌نامه"', text)
-
           manifest.write_text(text)
-
           kts = Path("android/app/build.gradle.kts")
           if kts.exists():
               t = kts.read_text()
               t = re.sub(r'namespace\s*=\s*"[^"]*"', f'namespace = "{package_name}"', t)
               t = re.sub(r'applicationId\s*=\s*"[^"]*"', f'applicationId = "{package_name}"', t)
               kts.write_text(t)
-
           groovy = Path("android/app/build.gradle")
           if groovy.exists():
               t = groovy.read_text()
@@ -203,69 +166,103 @@ jobs:
               groovy.write_text(t)
           PY
 
-          echo "--- Manifest MainActivity check ---"
-          grep -R "MainActivity" android/app/src/main/AndroidManifest.xml || true
-
-          echo "--- MainActivity file ---"
-          find android/app/src/main -name "MainActivity.kt" -print -exec cat {} \;
+      - name: Force custom launcher icons
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+          if [ ! -d android_launcher_icons ]; then
+            echo "ERROR: android_launcher_icons folder is missing inside ZIP."
+            exit 1
+          fi
+          echo "Removing default Flutter launcher icons..."
+          rm -f android/app/src/main/res/mipmap-mdpi/ic_launcher*.png || true
+          rm -f android/app/src/main/res/mipmap-hdpi/ic_launcher*.png || true
+          rm -f android/app/src/main/res/mipmap-xhdpi/ic_launcher*.png || true
+          rm -f android/app/src/main/res/mipmap-xxhdpi/ic_launcher*.png || true
+          rm -f android/app/src/main/res/mipmap-xxxhdpi/ic_launcher*.png || true
+          rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher*.xml || true
+          mkdir -p android/app/src/main/res/mipmap-mdpi
+          mkdir -p android/app/src/main/res/mipmap-hdpi
+          mkdir -p android/app/src/main/res/mipmap-xhdpi
+          mkdir -p android/app/src/main/res/mipmap-xxhdpi
+          mkdir -p android/app/src/main/res/mipmap-xxxhdpi
+          mkdir -p android/app/src/main/res/mipmap-anydpi-v26
+          mkdir -p android/app/src/main/res/values
+          cp -f android_launcher_icons/mipmap-mdpi/*.png android/app/src/main/res/mipmap-mdpi/
+          cp -f android_launcher_icons/mipmap-hdpi/*.png android/app/src/main/res/mipmap-hdpi/
+          cp -f android_launcher_icons/mipmap-xhdpi/*.png android/app/src/main/res/mipmap-xhdpi/
+          cp -f android_launcher_icons/mipmap-xxhdpi/*.png android/app/src/main/res/mipmap-xxhdpi/
+          cp -f android_launcher_icons/mipmap-xxxhdpi/*.png android/app/src/main/res/mipmap-xxxhdpi/
+          cp -f android_launcher_icons/mipmap-anydpi-v26/*.xml android/app/src/main/res/mipmap-anydpi-v26/
+          cp -f android_launcher_icons/values/*.xml android/app/src/main/res/values/
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          manifest = Path("android/app/src/main/AndroidManifest.xml")
+          text = manifest.read_text()
+          if "android:icon=" in text:
+              text = re.sub(r'android:icon="[^"]*"', 'android:icon="@mipmap/ic_launcher"', text)
+          else:
+              text = text.replace("<application", '<application android:icon="@mipmap/ic_launcher"', 1)
+          if "android:roundIcon=" in text:
+              text = re.sub(r'android:roundIcon="[^"]*"', 'android:roundIcon="@mipmap/ic_launcher_round"', text)
+          else:
+              text = text.replace("<application", '<application android:roundIcon="@mipmap/ic_launcher_round"', 1)
+          manifest.write_text(text)
+          PY
+          find android/app/src/main/res -name "ic_launcher*" -print
+          sha256sum android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+          grep -n "icon" android/app/src/main/AndroidManifest.xml || true
 
       - name: Apply release signing if keystore exists
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
-
           if [ -f android_signing/key.properties ] && ls android_signing/*.jks >/dev/null 2>&1; then
             echo "Keystore found. Applying release signing..."
-
             mkdir -p android/app
-
             cp -f android_signing/key.properties android/key.properties
             cp -f android_signing/*.jks android/app/
-
             KEYSTORE_FILE="$(basename "$(ls android/app/*.jks | head -n 1)")"
             sed -i "s#^storeFile=.*#storeFile=$KEYSTORE_FILE#g" android/key.properties || true
-
             python3 - <<'PY'
           from pathlib import Path
-
           kts = Path("android/app/build.gradle.kts")
-
           if kts.exists():
               t = kts.read_text()
-
               if "import java.util.Properties" not in t:
                   t = "import java.util.Properties\nimport java.io.FileInputStream\n\n" + t
-
               if "nasabKeystoreProperties" not in t:
-                  signing_block = """
-          val nasabKeystoreProperties = Properties()
-          val nasabKeystorePropertiesFile = rootProject.file("key.properties")
-          if (nasabKeystorePropertiesFile.exists()) {
-              nasabKeystoreProperties.load(FileInputStream(nasabKeystorePropertiesFile))
-          }
-
-          android {
-              signingConfigs {
-                  create("releaseNasab") {
-                      keyAlias = nasabKeystoreProperties["keyAlias"] as String
-                      keyPassword = nasabKeystoreProperties["keyPassword"] as String
-                      storeFile = file(nasabKeystoreProperties["storeFile"] as String)
-                      storePassword = nasabKeystoreProperties["storePassword"] as String
-                  }
-              }
-              buildTypes {
-                  getByName("release") {
-                      signingConfig = signingConfigs.getByName("releaseNasab")
-                  }
-              }
-          }
-          """
-                  t = t + "\n" + signing_block
+                  lines = [
+                      "",
+                      "val nasabKeystoreProperties = Properties()",
+                      "val nasabKeystorePropertiesFile = rootProject.file(\"key.properties\")",
+                      "if (nasabKeystorePropertiesFile.exists()) {",
+                      "    nasabKeystoreProperties.load(FileInputStream(nasabKeystorePropertiesFile))",
+                      "}",
+                      "",
+                      "android {",
+                      "    signingConfigs {",
+                      "        create(\"releaseNasab\") {",
+                      "            keyAlias = nasabKeystoreProperties[\"keyAlias\"] as String",
+                      "            keyPassword = nasabKeystoreProperties[\"keyPassword\"] as String",
+                      "            storeFile = file(nasabKeystoreProperties[\"storeFile\"] as String)",
+                      "            storePassword = nasabKeystoreProperties[\"storePassword\"] as String",
+                      "        }",
+                      "    }",
+                      "    buildTypes {",
+                      "        getByName(\"release\") {",
+                      "            signingConfig = signingConfigs.getByName(\"releaseNasab\")",
+                      "        }",
+                      "    }",
+                      "}",
+                      "",
+                  ]
+                  t = t + "\n" + "\n".join(lines)
                   kts.write_text(t)
           PY
-
           else
             echo "No keystore found. Build will continue without custom signing."
           fi
@@ -274,67 +271,49 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
-
           if [ -f android/app/build.gradle.kts ]; then
             perl -0pi -e "s/compileSdk\s*=\s*(flutter\.compileSdkVersion|\d+)/compileSdk = ${ANDROID_COMPILE_SDK}/g" android/app/build.gradle.kts
-            grep -n "compileSdk" android/app/build.gradle.kts || true
           fi
-
           if [ -f android/app/build.gradle ]; then
             perl -0pi -e "s/compileSdkVersion\s+(flutter\.compileSdkVersion|\d+)/compileSdkVersion ${ANDROID_COMPILE_SDK}/g" android/app/build.gradle
             perl -0pi -e "s/compileSdk\s*=\s*(flutter\.compileSdkVersion|\d+)/compileSdk = ${ANDROID_COMPILE_SDK}/g" android/app/build.gradle
-            grep -n "compileSdk" android/app/build.gradle || true
           fi
 
       - name: Clean Flutter state
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
-
           flutter clean
-          rm -rf .dart_tool
-          rm -rf build
-          rm -rf android/.gradle
-          rm -rf android/app/build
+          rm -rf .dart_tool build android/.gradle android/app/build
 
       - name: Get packages
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
-
           flutter pub get
 
       - name: Analyze
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
-
           flutter analyze --no-fatal-infos --no-fatal-warnings || true
 
       - name: Build release APK
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
-
           flutter build apk --release --no-shrink --build-name="$BUILD_NAME" --build-number="$BUILD_NUMBER"
 
       - name: Build release AAB
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
-
           flutter build appbundle --release --no-shrink --build-name="$BUILD_NAME" --build-number="$BUILD_NUMBER"
 
       - name: Upload APK artifact
