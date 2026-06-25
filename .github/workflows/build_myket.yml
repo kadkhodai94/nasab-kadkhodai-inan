@@ -271,6 +271,42 @@ jobs:
           print(manifest.read_text())
           PY
 
+      - name: Force Android deep links
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          manifest = Path("android/app/src/main/AndroidManifest.xml")
+          text = manifest.read_text()
+
+          deep_links = '''
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="shejrino" android:host="invite" />
+            </intent-filter>
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="podtman.anony.ir" android:path="/nasab/invite.php" />
+            </intent-filter>'''
+
+          if 'android:scheme="shejrino"' not in text:
+              marker = "</activity>"
+              if marker not in text:
+                  raise SystemExit("MainActivity closing tag not found for deep link injection")
+              text = text.replace(marker, deep_links + "\n        " + marker, 1)
+
+          manifest.write_text(text)
+          print(manifest.read_text())
+          PY
+
       - name: Force custom launcher icons
         shell: bash
         run: |
