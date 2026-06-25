@@ -166,6 +166,39 @@ jobs:
               groovy.write_text(t)
           PY
 
+      - name: Force Android internet permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          manifest = Path("android/app/src/main/AndroidManifest.xml")
+          text = manifest.read_text()
+
+          permissions = [
+              '<uses-permission android:name="android.permission.INTERNET" />',
+              '<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />',
+          ]
+
+          for permission in permissions:
+              name_match = re.search(r'android:name="([^"]+)"', permission)
+              if not name_match:
+                  continue
+              permission_name = name_match.group(1)
+              if permission_name not in text:
+                  text = text.replace("<manifest", "<manifest", 1)
+                  app_pos = text.find("<application")
+                  if app_pos == -1:
+                      raise SystemExit("AndroidManifest.xml has no <application> tag")
+                  text = text[:app_pos] + "    " + permission + "\n" + text[app_pos:]
+
+          manifest.write_text(text)
+          print(manifest.read_text())
+          PY
+
       - name: Force custom launcher icons
         shell: bash
         run: |
