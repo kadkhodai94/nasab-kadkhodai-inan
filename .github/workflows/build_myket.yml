@@ -73,16 +73,50 @@ jobs:
           mkdir -p app extracted_project
           unzip -q -o "$ZIP_FILE" -d extracted_project
 
-          PUBSPEC_PATH="$(find extracted_project -name pubspec.yaml | sort | head -n 1 || true)"
-          if [ -z "$PUBSPEC_PATH" ]; then
-            echo "ERROR: pubspec.yaml not found inside selected ZIP."
+          echo "Searching for the real Flutter app root..."
+          PROJECT_ROOT=""
+
+          while IFS= read -r PUBSPEC_PATH; do
+            CANDIDATE_ROOT="$(dirname "$PUBSPEC_PATH")"
+
+            if [[ "$CANDIDATE_ROOT" == *"/plugins/"* || "$CANDIDATE_ROOT" == */plugins ]]; then
+              echo "Skipping plugin pubspec: $CANDIDATE_ROOT"
+              continue
+            fi
+
+            if [ -f "$CANDIDATE_ROOT/lib/main.dart" ]; then
+              PROJECT_ROOT="$CANDIDATE_ROOT"
+              break
+            fi
+          done < <(find extracted_project -name pubspec.yaml | sort)
+
+          if [ -z "$PROJECT_ROOT" ]; then
+            echo "No non-plugin root found. Trying any pubspec with lib/main.dart..."
+            while IFS= read -r PUBSPEC_PATH; do
+              CANDIDATE_ROOT="$(dirname "$PUBSPEC_PATH")"
+              if [ -f "$CANDIDATE_ROOT/lib/main.dart" ]; then
+                PROJECT_ROOT="$CANDIDATE_ROOT"
+                break
+              fi
+            done < <(find extracted_project -name pubspec.yaml | sort)
+          fi
+
+          if [ -z "$PROJECT_ROOT" ]; then
+            echo "ERROR: Real Shejrino Flutter app root was not found."
             echo "Selected ZIP was: $ZIP_FILE"
-            find extracted_project -maxdepth 3 -type f | head -n 80 || true
+            echo "Found pubspec files:"
+            find extracted_project -name pubspec.yaml -print || true
+            echo "Found main.dart files:"
+            find extracted_project -path "*/lib/main.dart" -print || true
             exit 1
           fi
 
-          PROJECT_ROOT="$(dirname "$PUBSPEC_PATH")"
-          echo "Detected Flutter project root: $PROJECT_ROOT"
+          echo "Detected Flutter app root: $PROJECT_ROOT"
+
+          if [[ "$PROJECT_ROOT" == *"/plugins/"* || "$PROJECT_ROOT" == */plugins ]]; then
+            echo "ERROR: Detected root is still a plugin, not the app: $PROJECT_ROOT"
+            exit 1
+          fi
 
           if [ ! -f "$PROJECT_ROOT/lib/main.dart" ]; then
             echo "ERROR: lib/main.dart not found in detected Flutter project."
